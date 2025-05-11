@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Giám sát mực nước</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+
+  <body class="bg-gray-100 p-6 font-sans">
+    <div class="max-w-4xl mx-auto">
+      <h1 class="text-3xl font-bold mb-6 text-center">Giám sát mực nước bằng cảm biến siêu âm</h1>
+
+      <!-- Khu vực thông tin -->
+      <section class="bg-white p-6 rounded-xl shadow mb-6">
+        <h2 class="text-xl font-semibold mb-4">Thông tin mực nước</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-blue-100 p-4 rounded shadow">
+            <p class="text-lg font-medium">Khoảng cách đến mặt nước (cm):</p>
+            <p id="water-distance" class="text-3xl font-bold text-blue-700">--</p>
+          </div>
+          <div class="bg-green-100 p-4 rounded shadow flex items-center justify-between">
+            <div>
+              <p class="text-lg font-medium">Trạng thái máy bơm:</p>
+              <p id="pump-status" class="text-xl font-semibold">Đang tắt</p>
+            </div>
+            <button
+              id="pump-toggle"
+              class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+            >
+              Bật bơm
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Biểu đồ -->
+      <div class="bg-white p-6 rounded-xl shadow">
+        <canvas id="water-chart" height="200"></canvas>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const ctx = document.getElementById("water-chart").getContext("2d");
+        const chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Khoảng cách đến mặt nước (cm)",
+                data: [],
+                backgroundColor: "rgba(34, 197, 94, 0.2)",
+                borderColor: "rgb(34, 197, 94)",
+                tension: 0.3,
+              },
+            ],
+          },
+          options: {
+            scales: {
+              x: { title: { display: true, text: "Thời gian" } },
+              y: {
+                beginAtZero: true,
+                title: { display: true, text: "Khoảng cách (cm)" },
+              },
+            },
+          },
+        });
+
+        const distanceEl = document.getElementById("water-distance");
+        const pumpStatusEl = document.getElementById("pump-status");
+
+        // MQTT Client
+        const client = new Paho.MQTT.Client(
+          "broker.emqx.io",
+          8083,
+          "ultrasonic-client-" + Math.random()
+        );
+
+        client.onConnectionLost = (response) => {
+          console.error("Mất kết nối MQTT:", response.errorMessage);
+        };
+
+        client.onMessageArrived = (message) => {
+          const distance = parseFloat(message.payloadString); // Khoảng cách đo được (cm)
+          const now = new Date().toLocaleTimeString();
+
+          // Hiển thị dữ liệu
+          distanceEl.textContent = distance;
+
+          // Cập nhật biểu đồ
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.data.labels.push(now);
+          chart.data.datasets[0].data.push(distance);
+          chart.update();
+
+          // Bật bơm nếu khoảng cách lớn (nước thấp)
+          if (distance > 30) {
+            pumpStatusEl.textContent = "Đang bật";
+            pumpStatusEl.classList.add("text-red-600");
+
+            const msg = new Paho.MQTT.Message("PUMP_ON");
+            msg.destinationName = "HeThongNhaThongMinh/Control";
+            client.send(msg);
+          } else {
+            pumpStatusEl.textContent = "Đang tắt";
+            pumpStatusEl.classList.remove("text-red-600");
+
+            const msg = new Paho.MQTT.Message("PUMP_OFF");
+            msg.destinationName = "HeThongNhaThongMinh/Control";
+            client.send(msg);
+          }
+        };
+
+        client.connect({
+          onSuccess: () => {
+            console.log("Kết nối MQTT thành công");
+            client.subscribe("HeThongNhaThongMinh/Ultrasonic");
+          },
+        });
+
+        // Nút bật/tắt máy bơm thủ công
+        document.getElementById("pump-toggle").addEventListener("click", () => {
+          const current = pumpStatusEl.textContent;
+          const msg = new Paho.MQTT.Message(current === "Đang bật" ? "PUMP_OFF" : "PUMP_ON");
+          msg.destinationName = "HeThongNhaThongMinh/Control";
+          client.send(msg);
+
+          pumpStatusEl.textContent = current === "Đang bật" ? "Đang tắt" : "Đang bật";
+          pumpStatusEl.classList.toggle("text-red-600");
+        });
+      });
+    </script>
+  </body>
+</html>

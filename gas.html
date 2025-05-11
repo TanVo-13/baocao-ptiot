@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hệ thống nhà thông minh</title>
+    <link rel="stylesheet" href="style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  </head>
+
+  <body>
+    <div class="container">
+      <!-- Khu vực cảm biến khí gas -->
+      <section class="mt-10 px-4">
+        <h2 class="text-2xl font-semibold mb-4">Giám sát khí gas</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div class="bg-red-100 p-4 rounded shadow">
+            <p class="text-lg font-medium">Nồng độ khí gas (ppm):</p>
+            <p id="gas-value" class="text-3xl font-bold text-red-600">0</p>
+          </div>
+          <div
+            class="bg-yellow-100 p-4 rounded shadow flex items-center justify-between"
+          >
+            <p class="text-lg font-medium">Trạng thái còi:</p>
+            <p id="buzzer-status" class="text-xl font-semibold">Đang tắt</p>
+            <button
+              id="buzzer-toggle"
+              class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+            >
+              Tắt còi
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded shadow">
+          <canvas id="gas-chart" width="400" height="200"></canvas>
+        </div>
+      </section>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module" src="./src/js/firebase.js"></script>
+    <script type="module" src="./src/js/script.js"></script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const ctx = document.getElementById("gas-chart").getContext("2d");
+        const gasChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Nồng độ khí gas (ppm)",
+                data: [],
+                backgroundColor: "rgba(255, 99, 132, 0.2)",
+                borderColor: "rgb(255, 99, 132)",
+                borderWidth: 1,
+                tension: 0.3,
+              },
+            ],
+          },
+          options: {
+            scales: {
+              x: { title: { display: true, text: "Thời gian" } },
+              y: { beginAtZero: true },
+            },
+          },
+        });
+
+        // MQTT client
+        const client = new Paho.MQTT.Client(
+          "broker.emqx.io",
+          8083,
+          "gas-client-" + Math.random()
+        );
+        client.onConnectionLost = (response) => {
+          console.error("Mất kết nối:", response.errorMessage);
+        };
+
+        client.onMessageArrived = (message) => {
+          const gasValue = parseFloat(message.payloadString);
+          const timestamp = new Date().toLocaleTimeString();
+
+          // Cập nhật hiển thị
+          document.getElementById("gas-value").textContent = gasValue;
+
+          // Cập nhật biểu đồ
+          if (gasChart.data.labels.length > 20) {
+            gasChart.data.labels.shift();
+            gasChart.data.datasets[0].data.shift();
+          }
+          gasChart.data.labels.push(timestamp);
+          gasChart.data.datasets[0].data.push(gasValue);
+          gasChart.update();
+
+          // Bật còi nếu vượt ngưỡng
+          const buzzerStatus = document.getElementById("buzzer-status");
+          if (gasValue > 200) {
+            buzzerStatus.textContent = "Đang bật";
+            buzzerStatus.classList.add("text-red-600");
+          } else {
+            buzzerStatus.textContent = "Đang tắt";
+            buzzerStatus.classList.remove("text-red-600");
+          }
+        };
+
+        client.connect({
+          onSuccess: () => {
+            console.log("Đã kết nối MQTT");
+            client.subscribe("HeThongNhaThongMinh");
+          },
+        });
+
+        // Nút tắt còi
+        document
+          .getElementById("buzzer-toggle")
+          .addEventListener("click", () => {
+            const message = new Paho.MQTT.Message("BUZZER_OFF");
+            message.destinationName = "HeThongNhaThongMinh/Control";
+            client.send(message);
+
+            document.getElementById("buzzer-status").textContent = "Đang tắt";
+            document
+              .getElementById("buzzer-status")
+              .classList.remove("text-red-600");
+          });
+      });
+    </script>
+  </body>
+</html>

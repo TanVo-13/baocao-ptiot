@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Giám sát ánh sáng</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+
+  <body class="bg-gray-100 p-6 font-sans">
+    <div class="max-w-4xl mx-auto">
+      <h1 class="text-3xl font-bold mb-6 text-center">Giám sát cường độ ánh sáng</h1>
+
+      <!-- Khu vực hiển thị thông tin -->
+      <section class="bg-white p-6 rounded-xl shadow mb-6">
+        <h2 class="text-xl font-semibold mb-4">Thông tin ánh sáng</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-yellow-100 p-4 rounded shadow">
+            <p class="text-lg font-medium">Cường độ ánh sáng (lux):</p>
+            <p id="light-value" class="text-3xl font-bold text-yellow-700">--</p>
+          </div>
+          <div class="bg-gray-200 p-4 rounded shadow flex items-center justify-between">
+            <div>
+              <p class="text-lg font-medium">Trạng thái đèn:</p>
+              <p id="light-status" class="text-xl font-semibold">Đang tắt</p>
+            </div>
+            <button
+              id="light-toggle"
+              class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700"
+            >
+              Bật đèn
+            </button>
+          </div>
+        </div>
+
+        <!-- Ngưỡng ánh sáng -->
+        <div class="mt-6">
+          <p class="text-lg font-medium mb-2">Nhập ngưỡng cường độ ánh sáng (lux):</p>
+          <input
+            type="text"
+            id="threshold-input"
+            class="p-2 border border-gray-300 rounded w-full"
+            placeholder="Nhập ngưỡng (ví dụ: 100)"
+          />
+          <button
+            id="set-threshold"
+            class="bg-blue-600 text-white px-4 py-2 rounded mt-2 hover:bg-blue-700"
+          >
+            Thay đổi ngưỡng
+          </button>
+          <p id="threshold-value" class="mt-2 text-xl font-semibold">Ngưỡng hiện tại: 100 lux</p>
+        </div>
+      </section>
+
+      <!-- Biểu đồ ánh sáng -->
+      <div class="bg-white p-6 rounded-xl shadow">
+        <canvas id="light-chart" height="200"></canvas>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const ctx = document.getElementById("light-chart").getContext("2d");
+        const chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Cường độ ánh sáng (lux)",
+                data: [],
+                backgroundColor: "rgba(250, 204, 21, 0.2)",
+                borderColor: "rgb(250, 204, 21)",
+                tension: 0.3,
+              },
+            ],
+          },
+          options: {
+            scales: {
+              x: { title: { display: true, text: "Thời gian" } },
+              y: {
+                beginAtZero: true,
+                title: { display: true, text: "Lux" },
+              },
+            },
+          },
+        });
+
+        const lightValueEl = document.getElementById("light-value");
+        const lightStatusEl = document.getElementById("light-status");
+        const thresholdInput = document.getElementById("threshold-input");
+        const thresholdValueEl = document.getElementById("threshold-value");
+
+        let threshold = 100; // Ngưỡng mặc định
+
+        // MQTT Client
+        const client = new Paho.MQTT.Client(
+          "broker.emqx.io",
+          8083,
+          "light-client-" + Math.random()
+        );
+
+        client.onConnectionLost = (response) => {
+          console.error("Mất kết nối MQTT:", response.errorMessage);
+        };
+
+        client.onMessageArrived = (message) => {
+          const lux = parseFloat(message.payloadString); // Cường độ ánh sáng
+          const now = new Date().toLocaleTimeString();
+
+          // Hiển thị dữ liệu
+          lightValueEl.textContent = lux;
+
+          // Cập nhật biểu đồ
+          if (chart.data.labels.length > 20) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.data.labels.push(now);
+          chart.data.datasets[0].data.push(lux);
+          chart.update();
+
+          // Tự động điều khiển đèn
+          if (lux < threshold) {
+            // ánh sáng yếu → bật đèn
+            lightStatusEl.textContent = "Đang bật";
+            lightStatusEl.classList.add("text-yellow-600");
+            sendMQTT("LIGHT_ON");
+          } else {
+            // ánh sáng mạnh → tắt đèn
+            lightStatusEl.textContent = "Đang tắt";
+            lightStatusEl.classList.remove("text-yellow-600");
+            sendMQTT("LIGHT_OFF");
+          }
+        };
+
+        function sendMQTT(payload) {
+          const msg = new Paho.MQTT.Message(payload);
+          msg.destinationName = "HeThongNhaThongMinh/Control";
+          client.send(msg);
+        }
+
+        client.connect({
+          onSuccess: () => {
+            console.log("Đã kết nối MQTT");
+            client.subscribe("HeThongNhaThongMinh/LightSensor");
+          },
+        });
+
+        // Nút bật/tắt đèn thủ công
+        document.getElementById("light-toggle").addEventListener("click", () => {
+          const current = lightStatusEl.textContent;
+          if (current === "Đang bật") {
+            sendMQTT("LIGHT_OFF");
+            lightStatusEl.textContent = "Đang tắt";
+            lightStatusEl.classList.remove("text-yellow-600");
+          } else {
+            sendMQTT("LIGHT_ON");
+            lightStatusEl.textContent = "Đang bật";
+            lightStatusEl.classList.add("text-yellow-600");
+          }
+        });
+
+        // Thay đổi ngưỡng từ input
+        document.getElementById("set-threshold").addEventListener("click", () => {
+          const newThreshold = parseFloat(thresholdInput.value);
+          if (!isNaN(newThreshold)) {
+            threshold = newThreshold;
+            thresholdValueEl.textContent = `Ngưỡng hiện tại: ${threshold} lux`;
+          } else {
+            alert("Vui lòng nhập một giá trị hợp lệ!");
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
