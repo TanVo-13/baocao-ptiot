@@ -62,10 +62,10 @@
             >
             <div class="relative">
               <input
+                onclick="onChangeAutoDht()"
                 type="checkbox"
                 id="mode-toggle"
                 class="sr-only peer"
-                checked
               />
               <div
                 class="w-12 h-7 bg-gray-300 rounded-full shadow-inner peer-checked:bg-green-600 transition-colors"
@@ -210,7 +210,7 @@
           modeToggle.checked = false;
 
           const isOn = acStatus.textContent.includes("bật");
-          
+
           const message = new Paho.MQTT.Message(!isOn ? "ON" : "OFF");
           message.destinationName = "HeThongNhaThongMinh/DHT22/Control/AC";
           client.send(message);
@@ -239,9 +239,11 @@
       function onMessageArrived(message) {
         if (message.destinationName === "HeThongNhaThongMinh") {
           const data = JSON.parse(message.payloadString);
+          console.log("Nhận dữ liệu:", data);
           const temp = parseFloat(data.nhietdo);
           const humidity = parseFloat(data.doam);
           const timestamp = new Date();
+          const automodeDht = data.automodeDht;
           const timeStr = timestamp.toLocaleTimeString();
 
           if (isNaN(temp) || isNaN(humidity))
@@ -269,7 +271,8 @@
           const acStatus = document.getElementById("ac-status");
           const toggleBtn = document.getElementById("ac-toggle");
 
-          // Điều khiển tự động
+          modeToggle.checked = automodeDht;
+
           if (modeToggle.checked) {
             if (temp > currentThreshold) {
               acStatus.textContent = "Đang bật";
@@ -281,7 +284,20 @@
               toggleBtn.textContent = "Bật điều hòa";
             }
           }
+
+          // Điều khiển tự động
         }
+      }
+
+      function onChangeAutoDht() {
+        const modeToggle = document.getElementById("mode-toggle");
+
+        const message = new Paho.MQTT.Message(
+          modeToggle.checked ? "ON" : "OFF"
+        );
+        message.destinationName =
+          "HeThongNhaThongMinh/DHT22/Control/automodeDht";
+        client.send(message);
       }
 
       function updateChart(time, temp, humidity) {
