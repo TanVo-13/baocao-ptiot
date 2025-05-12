@@ -4,22 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Giám sát nhiệt độ và độ ẩm</title>
-    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap"
       rel="stylesheet"
     />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.1.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
   </head>
 
-  <body>
-    <div class="container">
-      <!-- Khu vực cảm biến nhiệt độ và độ ẩm -->
-      <section class="mt-10 px-4">
+  <body class="font-[Poppins] bg-gray-100">
+    <div class="container mx-auto mt-10 px-4">
+      <section>
         <h2 class="text-2xl font-semibold mb-4">Giám sát nhiệt độ và độ ẩm</h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -29,16 +28,20 @@
           </div>
           <div class="bg-green-100 p-4 rounded shadow">
             <p class="text-lg font-medium">Độ ẩm (%):</p>
-            <p id="humidity-value" class="text-3xl font-bold text-green-600">0</p>
+            <p id="humidity-value" class="text-3xl font-bold text-green-600">
+              0
+            </p>
           </div>
-          <div class="bg-yellow-100 p-4 rounded shadow flex items-center justify-between md:col-span-2">
+          <div
+            class="bg-yellow-100 p-4 rounded shadow flex items-center justify-between md:col-span-2"
+          >
             <p class="text-lg font-medium">Trạng thái điều hòa:</p>
             <p id="ac-status" class="text-xl font-semibold">Đang tắt</p>
             <button
               id="ac-toggle"
               class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
             >
-              Tắt điều hòa
+              Bật điều hòa
             </button>
           </div>
         </div>
@@ -49,10 +52,14 @@
       </section>
     </div>
 
+    <script type="module" src="./src/js/firebase.js"></script>
     <script>
+      let client;
+      let tempChart;
+
       document.addEventListener("DOMContentLoaded", () => {
         const ctx = document.getElementById("temp-chart").getContext("2d");
-        const tempChart = new Chart(ctx, {
+        tempChart = new Chart(ctx, {
           type: "line",
           data: {
             labels: [],
@@ -81,64 +88,131 @@
           },
         });
 
-        // MQTT client
-        const client = new Paho.MQTT.Client(
+        // Lấy dữ liệu ban đầu từ Firebase
+        firebase.auth().onAuthStateChanged((user) => {
+          if (user) {
+            const userId = user.uid;
+            const db = firebase.database();
+            db.ref(`users/${userId}/sensors/dht22`)
+              .orderByKey()
+              .limitToLast(20)
+              .once("value")
+              .then((snapshot) => {
+                snapshot.forEach((childSnapshot) => {
+                  const data = childSnapshot.val();
+                  const time = new Date(
+                    +childSnapshot.key
+                  ).toLocaleTimeString();
+                  updateChart(
+                    time,
+                    parseFloat(data.nhietdo),
+                    parseFloat(data.doam)
+                  );
+                });
+              });
+          }
+        });
+
+        // MQTT
+        client = new Paho.MQTT.Client(
           "broker.emqx.io",
           8083,
-          "temp-client-" + Math.random()
+          "b5df0685-8a6f-4639-9211-e3336dae0b52"
         );
-
-        client.onConnectionLost = (response) => {
-          console.error("Mất kết nối:", response.errorMessage);
+        client.onConnectionLost = (res) => {
+          if (res.errorCode !== 0)
+            console.error("Mất kết nối:", res.errorMessage);
         };
-
-        client.onMessageArrived = (message) => {
-          const [temp, humidity] = message.payloadString.split(",").map(parseFloat);
-          const timestamp = new Date().toLocaleTimeString();
-
-          // Cập nhật giá trị
-          document.getElementById("temp-value").textContent = temp.toFixed(1);
-          document.getElementById("humidity-value").textContent = humidity.toFixed(1);
-
-          // Cập nhật biểu đồ
-          if (tempChart.data.labels.length > 20) {
-            tempChart.data.labels.shift();
-            tempChart.data.datasets[0].data.shift();
-            tempChart.data.datasets[1].data.shift();
-          }
-          tempChart.data.labels.push(timestamp);
-          tempChart.data.datasets[0].data.push(temp);
-          tempChart.data.datasets[1].data.push(humidity);
-          tempChart.update();
-
-          // Xử lý trạng thái điều hòa
-          const acStatus = document.getElementById("ac-status");
-          if (temp > 30) {
-            acStatus.textContent = "Đang bật";
-            acStatus.classList.add("text-blue-600");
-          } else {
-            acStatus.textContent = "Đang tắt";
-            acStatus.classList.remove("text-blue-600");
-          }
-        };
+        client.onMessageArrived = onMessageArrived;
 
         client.connect({
           onSuccess: () => {
-            console.log("Đã kết nối MQTT");
-            client.subscribe("HeThongNhaThongMinh/TempHumid");
+            console.log("MQTT connected");
+            client.subscribe("HeThongNhaThongMinh");
           },
+          onFailure: (err) =>
+            console.error("Kết nối MQTT thất bại:", err.errorMessage),
         });
 
-        // Nút điều khiển điều hòa
-        document.getElementById("ac-toggle").addEventListener("click", () => {
-          const message = new Paho.MQTT.Message("AC_OFF");
-          message.destinationName = "HeThongNhaThongMinh/Control";
-          client.send(message);
+        // Nút điều hòa
+        const toggleBtn = document.getElementById("ac-toggle");
+        const acStatus = document.getElementById("ac-status");
 
-          document.getElementById("ac-status").textContent = "Đang tắt";
-          document.getElementById("ac-status").classList.remove("text-blue-600");
+        toggleBtn.addEventListener("click", () => {
+          if (!client.isConnected()) return alert("MQTT chưa kết nối!");
+
+          const isOn = acStatus.textContent.includes("bật");
+          const command = new Paho.MQTT.Message(isOn ? "AC_OFF" : "AC_ON");
+          command.destinationName = "HeThongNhaThongMinh/Control";
+          client.send(command);
+
+          acStatus.textContent = isOn ? "Đang tắt" : "Đang bật";
+          acStatus.classList.toggle("text-blue-600", !isOn);
+          toggleBtn.textContent = isOn ? "Bật điều hòa" : "Tắt điều hòa";
         });
       });
+
+      function onMessageArrived(message) {
+        console.log("message", message);
+        console.log("message.destinationName", message.destinationName);
+        if (message.destinationName === "HeThongNhaThongMinh") {
+          const data = JSON.parse(message.payloadString);
+          const temp = parseFloat(data.nhietdo);
+          const humidity = parseFloat(data.doam);
+          const timestamp = new Date();
+          const timeStr = timestamp.toLocaleTimeString();
+
+          if (isNaN(temp) || isNaN(humidity))
+            return console.error("Dữ liệu sai:", data);
+
+          // Cập nhật biểu đồ
+          updateChart(timeStr, temp, humidity);
+
+          // Cập nhật Firebase
+          firebase.auth().onAuthStateChanged((user) => {
+            if (user) {
+              const db = firebase.database();
+              const time = Date.now();
+              db.ref(`users/${user.uid}/sensors/dht22/${time}`).set({
+                nhietdo: temp,
+                doam: humidity,
+                timestamp: time,
+              });
+            }
+          });
+
+          // Cập nhật giao diện
+          document.getElementById("temp-value").textContent = temp.toFixed(1);
+          document.getElementById("humidity-value").textContent =
+            humidity.toFixed(1);
+
+          const acStatus = document.getElementById("ac-status");
+          const toggleBtn = document.getElementById("ac-toggle");
+          if (temp > 30) {
+            acStatus.textContent = "Đang bật";
+            acStatus.classList.add("text-blue-600");
+            toggleBtn.textContent = "Tắt điều hòa";
+          } else {
+            acStatus.textContent = "Đang tắt";
+            acStatus.classList.remove("text-blue-600");
+            toggleBtn.textContent = "Bật điều hòa";
+          }
+        }
+      }
+
+      function updateChart(time, temp, humidity) {
+        const maxPoints = 20;
+        const chart = tempChart;
+        if (chart.data.labels.length >= maxPoints) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+          chart.data.datasets[1].data.shift();
+        }
+        chart.data.labels.push(time);
+        chart.data.datasets[0].data.push(temp);
+        chart.data.datasets[1].data.push(humidity);
+        chart.update();
+      }
     </script>
   </body>
 </html>

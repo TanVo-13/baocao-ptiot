@@ -107,12 +107,14 @@
           <div class="flex flex-col gap-1 text-gray-800">
             <div class="flex items-center justify-between">
               <span>💧 Độ ẩm:</span>
-              <span id="humidity" class="font-bold text-green-700">55%</span>
+              <span id="humidity" class="font-bold text-green-700"
+                >Chưa xác định</span
+              >
             </div>
             <div class="flex items-center justify-between">
               <span>🌞 Nhiệt độ:</span>
               <span id="temperature" class="font-bold text-green-700"
-                >32°C</span
+                >Chưa xác định</span
               >
             </div>
           </div>
@@ -130,13 +132,13 @@
             <div class="flex items-center justify-between">
               <span>💧 Độ ẩm đất:</span>
               <span id="humidity-soil" class="font-bold text-blue-700"
-                >100%</span
+                >Chưa xác định</span
               >
             </div>
             <div class="flex items-center justify-between">
               <span>📊 Trạng thái:</span>
               <span id="soil-status" class="font-semibold text-blue-600"
-                >Ẩm ướt</span
+                >Chưa xác định</span
               >
             </div>
           </div>
@@ -153,12 +155,14 @@
           <div class="flex items-center justify-between text-gray-800">
             <span>💨 Trạng thái:</span>
             <span id="gas-status" class="font-bold text-pink-700"
-              >Phát hiện khí</span
+              >Chưa xác định</span
             >
           </div>
           <div class="flex items-center justify-between text-gray-800">
             <span>🔢 Nồng độ:</span>
-            <span id="gas-value" class="font-bold text-pink-700">350 ppm</span>
+            <span id="gas-value" class="font-bold text-pink-700"
+              >Chưa xác định</span
+            >
           </div>
         </a>
 
@@ -171,7 +175,7 @@
           <div class="flex items-center justify-between text-gray-800">
             <span>🌦️ Tình trạng:</span>
             <span id="rain-status" class="font-bold text-indigo-700"
-              >Có mưa</span
+              >Chưa xác định</span
             >
           </div>
         </a>
@@ -188,13 +192,13 @@
             <div class="flex items-center justify-between">
               <span>Khoảng cách đến mực nước:</span>
               <span id="water-level" class="font-bold text-yellow-700"
-                >225 cm</span
+                >Chưa xác định</span
               >
             </div>
             <div class="flex items-center justify-between">
               <span>📊 Trạng thái:</span>
               <span id="water-status" class="font-semibold text-yellow-600"
-                >Chưa đ</span
+                >Chưa xác định</span
               >
             </div>
           </div>
@@ -211,13 +215,13 @@
           <div class="flex items-center justify-between text-gray-800">
             <span>☀️ Cường độ ánh sáng:</span>
             <span id="light-intensity" class="font-bold text-gray-800"
-              >720 lx</span
+              >Chưa xác định</span
             >
           </div>
           <div class="flex items-center justify-between text-gray-800">
             <span>🔆 Mức đánh giá:</span>
             <span id="light-level" class="font-semibold text-gray-700"
-              >Sáng vừa</span
+              >Chưa xác định</span
             >
           </div>
         </a>
@@ -228,7 +232,125 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script>
+      //$('.bat').click(function(){
+      //message = new Paho.MQTT.Message("on");
+      //message.destinationName = "VLUTE/LED";
+      //client.send(message);
+      //});
 
-    
+      //$('.tat').click(function(){
+      //message = new Paho.MQTT.Message("off");
+      //message.destinationName = "VLUTE/LED";
+      //client.send(message);
+      //});
+
+      client = new Paho.MQTT.Client(
+        "broker.emqx.io",
+        Number(8083),
+        "b5df0685-8a6f-4639-9211-e3336dae0b52"
+      );
+
+      client.onConnectionLost = onConnectionLost;
+      client.onMessageArrived = onMessageArrived;
+
+      client.connect({ onSuccess: onConnect });
+
+      function onConnect() {
+        console.log("onConnect");
+        client.subscribe("HeThongNhaThongMinh");
+      }
+
+      function onConnectionLost(responseObject) {
+        if (responseObject.errorCode !== 0) {
+          console.log("onConnectionLost:" + responseObject.errorMessage);
+        }
+      }
+
+      function onMessageArrived(message) {
+        console.log("onMessageArrived:" + message.payloadString);
+        const data = JSON.parse(message.payloadString);
+        console.log(data);
+
+        // Chuyển đổi độ ẩm đất sang %
+        const doamdat_percent = Math.round(
+          ((4095 - Number(data.doamdat)) / 4095) * 100
+        );
+
+        // Cập nhật dữ liệu cảm biến
+        document.getElementById("humidity").innerText = data.doam + "%";
+        document.getElementById("temperature").innerText = data.nhietdo + "°C";
+        document.getElementById("humidity-soil").innerText =
+          doamdat_percent + "%";
+        document.getElementById("soil-status").innerText =
+          getStatusDoAmDat(doamdat_percent);
+
+        document.getElementById("gas-status").innerText = getStatusKhiGas(
+          Number(data.khigas)
+        );
+        document.getElementById("gas-value").innerText = data.khigas + " ppm";
+
+        document.getElementById("rain-status").innerText =
+          Number(data.mua) === 1 ? "Đang mưa" : "Trời khô ráo";
+
+        document.getElementById("water-level").innerText =
+          data.khoangcach + " cm";
+        document.getElementById("water-status").innerText = getStatusKhoangCach(
+          Number(data.khoangcach)
+        );
+
+        document.getElementById("light-intensity").innerText =
+          data.anhsang + " lx";
+        document.getElementById("light-level").innerText = getStatusAnhSang(
+          Number(data.anhsang)
+        );
+      }
+
+      function getStatusDoAmDat(value) {
+        if (value >= 80) {
+          return "Đất ngập nước";
+        } else if (value >= 50) {
+          return "Đất ướt";
+        } else if (value >= 30) {
+          return "Đất ẩm";
+        } else {
+          return "Đất khô";
+        }
+      }
+
+      function getStatusKhoangCach(value) {
+        if (value >= 350) {
+          return "Bể gần cạn";
+        } else if (value >= 200) {
+          return "Bể chưa đầy";
+        } else if (value >= 20) {
+          return "Bể gần đầy";
+        } else {
+          return "Bể chứa đầy";
+        }
+      }
+
+      function getStatusAnhSang(value) {
+        if (value <= 100) {
+          return "Tối";
+        } else if (value < 1000) {
+          return "Sáng vừa";
+        } else {
+          return "Sáng mạnh";
+        }
+      }
+
+      function getStatusKhiGas(value) {
+        if (value >= 2000) {
+          return "Nguy hiểm! Nồng độ khí gas rất cao";
+        } else if (value >= 1234) {
+          return "Phát hiện khí gas";
+        } else if (value >= 400) {
+          return "Có dấu hiệu khí gas";
+        } else {
+          return "Không phát hiện khí gas";
+        }
+      }
+    </script>
   </body>
 </html>

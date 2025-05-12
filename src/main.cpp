@@ -155,7 +155,7 @@ void loop() {
   client.loop();
 
   static unsigned long lastSend = 0;
-  if (millis() - lastSend > 5000) {
+  if (millis() - lastSend > 1000) {
     lastSend = millis();
 
     float nhietdo = dht.readTemperature();
